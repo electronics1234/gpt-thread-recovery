@@ -1,0 +1,7 @@
+[theme]
+base="dark"
+primaryColor="#00FF88"         # Neon green
+backgroundColor="#000000"      # Black
+secondaryBackgroundColor="#1a1a1a"  # Dark gray
+textColor="#FFFFFF"            # White
+font="sans serif"
