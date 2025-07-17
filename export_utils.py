@@ -1,19 +1,11 @@
 import os
 from datetime import datetime
-import pdfkit
-from dotenv import load_dotenv
-from tempfile import NamedTemporaryFile
+from io import BytesIO
+from xhtml2pdf import pisa
 
-load_dotenv()
-
-# Only return data in-memory without writing to disk
-def export_to_markdown(messages):
+def export_to_markdown(messages, filename="chat_export"):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    md_lines = [
-        f"# GPT Conversation Export\n",
-        f"**Exported:** {timestamp}\n",
-        "---\n"
-    ]
+    md_lines = [f"# GPT Conversation Export\n", f"**File:** {filename}", f"**Exported:** {timestamp}\n", "---\n"]
 
     for msg in messages:
         role = msg["role"].capitalize()
@@ -26,24 +18,33 @@ def export_to_markdown(messages):
 
 def export_to_pdf(messages):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    html_lines = [
-        f"<h1>GPT Conversation Export</h1>",
-        f"<p><b>Exported:</b> {timestamp}</p><hr>"
-    ]
+
+    html = f"""
+    <html>
+    <head>
+    <style>
+    body {{ font-family: Arial; padding: 20px; }}
+    h1 {{ color: #2c3e50; }}
+    .role {{ font-weight: bold; margin-top: 20px; }}
+    .msg {{ margin-bottom: 10px; }}
+    </style>
+    </head>
+    <body>
+    <h1>GPT Conversation Export</h1>
+    <p><b>Exported:</b> {timestamp}</p><hr>
+    """
 
     for msg in messages:
         role = msg["role"].capitalize()
         content = msg["content"].replace("\n", "<br>")
-        html_lines.append(f"<h3>{role}</h3><p>{content}</p><hr>")
+        html += f"<div class='role'>{role}</div><div class='msg'>{content}</div><hr>"
 
-    html_content = "\n".join(html_lines)
-    wkhtmltopdf_path = os.getenv("WKHTMLTOPDF_PATH")
-    config = pdfkit.configuration(wkhtmltopdf=wkhtmltopdf_path) if wkhtmltopdf_path else None
+    html += "</body></html>"
 
-    with NamedTemporaryFile(delete=False, suffix=".html", mode="w", encoding="utf-8") as html_file:
-        html_file.write(html_content)
-        html_file_path = html_file.name
+    pdf_bytes = BytesIO()
+    pisa_status = pisa.CreatePDF(src=html, dest=pdf_bytes)
+    if pisa_status.err:
+        return None
 
-    with NamedTemporaryFile(delete=False, suffix=".pdf") as pdf_file:
-        pdfkit.from_file(html_file_path, pdf_file.name, configuration=config)
-        return pdf_file.name
+    pdf_bytes.seek(0)
+    return pdf_bytes

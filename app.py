@@ -38,21 +38,6 @@ with st.sidebar:
             f.write(uploaded_file.getbuffer())
         st.success(f"Uploaded: {uploaded_file.name}")
 
-    st.markdown("### 🏷 Add Tags to Selected Thread")
-    if st.session_state.selected_file:
-        tag_input = st.text_input("Enter comma-separated tags for this thread:", key="tag_input")
-        if tag_input:
-            json_path = os.path.join(OUTPUT_DIR, os.path.splitext(st.session_state.selected_file)[0] + ".json")
-            try:
-                with open(json_path, "r", encoding="utf-8") as jf:
-                    data = json.load(jf)
-            except Exception:
-                data = {}
-            data["tags"] = [t.strip() for t in tag_input.split(",") if t.strip()]
-            with open(json_path, "w", encoding="utf-8") as jf:
-                json.dump(data, jf, indent=2, ensure_ascii=False)
-            st.success("Tags updated for this thread.")
-
     st.markdown("### 🗂 Filter by Tag")
 
     files = sorted([f for f in os.listdir(UPLOAD_DIR) if f.endswith(".mhtml")],
@@ -125,7 +110,6 @@ if st.session_state.selected_file:
         st.session_state.matched_elements = []
         messages = st.session_state.messages
 
-        # Group messages into user-assistant pairs
         paired_messages = []
         temp_pair = {}
         for msg in messages:
@@ -173,7 +157,6 @@ if st.session_state.selected_file:
             </script>
             """, unsafe_allow_html=True)
 
-        # Export buttons — generate only when clicked
         base_filename = os.path.splitext(st.session_state.selected_file)[0]
 
         st.markdown("---")
@@ -187,9 +170,11 @@ if st.session_state.selected_file:
 
         with col_pdf:
             if st.button("Download PDF"):
-                pdf_path = export_to_pdf(messages)
-                with open(pdf_path, "rb") as f_pdf:
-                    st.download_button("📥 Save PDF", f_pdf, file_name=f"{base_filename}.pdf", mime="application/pdf")
+                pdf_bytes = export_to_pdf(messages)
+                if pdf_bytes:
+                    st.download_button("📥 Save PDF", pdf_bytes, file_name=f"{base_filename}.pdf", mime="application/pdf")
+                else:
+                    st.error("Failed to generate PDF.")
 
         with col_json:
             if st.button("Download JSON"):
