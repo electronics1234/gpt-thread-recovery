@@ -35,12 +35,13 @@ def parse_mhtml(uploaded_file):
         if not cleaned:
             continue
 
+        # Detect speaker role based on known ChatGPT styles
         if "prose" in class_list and "markdown" in class_list:
             role = "assistant"
         elif "whitespace-pre-wrap" in class_list:
             role = "user"
         else:
-            continue  # Skip unknown roles
+            continue  # Skip unknown role blocks
 
         messages.append({
             "index": index,
