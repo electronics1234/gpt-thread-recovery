@@ -26,6 +26,9 @@ if "match_index" not in st.session_state:
 if "matched_elements" not in st.session_state:
     st.session_state.matched_elements = []
 
+if "tags" not in st.session_state:
+    st.session_state.tags = ""
+
 with st.sidebar:
     st.markdown("### 🔍 Search")
     keyword = st.text_input("Highlight keyword in conversation:", key="search_box")
@@ -37,6 +40,26 @@ with st.sidebar:
         with open(file_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
         st.success(f"Uploaded: {uploaded_file.name}")
+
+    st.markdown("### 🏷 Add Tag(s) for This Thread")
+    st.session_state.tags = st.text_input("Enter tags separated by commas (e.g. ai, research, notes)", value=st.session_state.tags)
+    if st.session_state.selected_file:
+        if st.button("Save Tags"):
+            base_filename = os.path.splitext(st.session_state.selected_file)[0]
+            json_path = os.path.join(OUTPUT_DIR, f"{base_filename}.json")
+            tags_list = [tag.strip() for tag in st.session_state.tags.split(",") if tag.strip()]
+            try:
+                if os.path.exists(json_path):
+                    with open(json_path, "r", encoding="utf-8") as jf:
+                        json_data = json.load(jf)
+                else:
+                    json_data = {}
+                json_data["tags"] = tags_list
+                with open(json_path, "w", encoding="utf-8") as jf:
+                    json.dump(json_data, jf, indent=2, ensure_ascii=False)
+                st.success("✅ Tags updated for this thread")
+            except Exception as e:
+                st.error(f"❌ Failed to save tags: {e}")
 
     st.markdown("### 🗂 Filter by Tag")
 
