@@ -1,16 +1,18 @@
 import streamlit as st
 from parser.mhtml_parser import parse_mhtml
+from export_utils import export_to_markdown, export_to_pdf
 import json
 import os
 from datetime import datetime
-import time
 import re
 
 st.set_page_config(page_title="GPT Thread Recovery Kit", layout="wide")
 st.title("GPT Thread Recovery Kit v1.0")
 
 UPLOAD_DIR = "uploads"
+OUTPUT_DIR = "output"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 if "selected_file" not in st.session_state:
     st.session_state.selected_file = None
@@ -27,6 +29,7 @@ if "matched_elements" not in st.session_state:
 with st.sidebar:
     st.markdown("### 🔍 Search")
     keyword = st.text_input("Highlight keyword in conversation:", key="search_box")
+    filter_keyword = st.checkbox("Filter results by keyword", value=False)
 
     uploaded_file = st.file_uploader("Upload your .mhtml ChatGPT export", type="mhtml")
     if uploaded_file:
@@ -35,13 +38,73 @@ with st.sidebar:
             f.write(uploaded_file.getbuffer())
         st.success(f"Uploaded: {uploaded_file.name}")
 
-    st.markdown("### 🗂 Available Conversations")
-    files = sorted([f for f in os.listdir(UPLOAD_DIR) if f.endswith(".mhtml")], key=lambda x: os.path.getmtime(os.path.join(UPLOAD_DIR, x)), reverse=True)
+    st.markdown("### 🏷 Add Tags to Selected Thread")
+    if st.session_state.selected_file:
+        tag_input = st.text_input("Enter comma-separated tags for this thread:", key="tag_input")
+        if tag_input:
+            json_path = os.path.join(OUTPUT_DIR, os.path.splitext(st.session_state.selected_file)[0] + ".json")
+            try:
+                with open(json_path, "r", encoding="utf-8") as jf:
+                    data = json.load(jf)
+            except Exception:
+                data = {}
+            data["tags"] = [t.strip() for t in tag_input.split(",") if t.strip()]
+            with open(json_path, "w", encoding="utf-8") as jf:
+                json.dump(data, jf, indent=2, ensure_ascii=False)
+            st.success("Tags updated for this thread.")
+
+    st.markdown("### 🗂 Filter by Tag")
+
+    files = sorted([f for f in os.listdir(UPLOAD_DIR) if f.endswith(".mhtml")],
+                   key=lambda x: os.path.getmtime(os.path.join(UPLOAD_DIR, x)), reverse=True)
+
+    tag_map = {}
     for f in files:
-        if st.button(f, key=f"file_{f}"):
-            st.session_state.selected_file = f
-            with open(os.path.join(UPLOAD_DIR, f), "rb") as file:
-                st.session_state.messages = parse_mhtml(file)
+        json_filename = os.path.splitext(f)[0] + ".json"
+        json_path = os.path.join(OUTPUT_DIR, json_filename)
+        tags = []
+
+        if os.path.exists(json_path):
+            try:
+                with open(json_path, "r", encoding="utf-8") as jf:
+                    json_data = json.load(jf)
+                    tags = json_data.get("tags", [])
+            except Exception:
+                pass
+
+        tag_map[f] = tags
+
+    all_tags = sorted(set(tag for tags in tag_map.values() for tag in tags))
+    selected_tags = st.multiselect("Filter by tag(s):", all_tags)
+
+    st.markdown("### 📂 Available Conversations")
+
+    for f in files:
+        tags = tag_map.get(f, [])
+        if selected_tags and not any(tag in tags for tag in selected_tags):
+            continue
+
+        label = f"{f} ({', '.join(tags)})" if tags else f
+        col1, col2 = st.columns([5, 1])
+        with col1:
+            if st.button(label, key=f"file_{f}"):
+                st.session_state.selected_file = f
+                with open(os.path.join(UPLOAD_DIR, f), "rb") as file:
+                    st.session_state.messages = parse_mhtml(file)
+        with col2:
+            delete_clicked = st.button("🗑", key=f"del_{f}", help="Delete file", use_container_width=True)
+            if delete_clicked:
+                try:
+                    os.remove(os.path.join(UPLOAD_DIR, f))
+                    base = os.path.splitext(f)[0]
+                    for ext in [".json", ".md", ".pdf", ".html"]:
+                        out_file = os.path.join(OUTPUT_DIR, base + ext)
+                        if os.path.exists(out_file):
+                            os.remove(out_file)
+                    st.toast(f"Deleted: {f}", icon="🗑️")
+                    st.experimental_rerun()
+                except Exception as e:
+                    st.error(f"Failed to delete {f}: {e}")
 
     st.markdown("---")
     st.markdown("**GPT Thread Recovery Kit v1.0**")
@@ -60,10 +123,9 @@ if st.session_state.selected_file:
         st.subheader("Conversation View (Side-by-Side)")
 
         st.session_state.matched_elements = []
-
         messages = st.session_state.messages
 
-        # Group messages into pairs (user followed by assistant)
+        # Group messages into user-assistant pairs
         paired_messages = []
         temp_pair = {}
         for msg in messages:
@@ -80,6 +142,13 @@ if st.session_state.selected_file:
             paired_messages.append(temp_pair)
 
         for i, pair in enumerate(paired_messages):
+            if filter_keyword and keyword:
+                if not (
+                    keyword.lower() in pair.get("user", "").lower()
+                    or keyword.lower() in pair.get("assistant", "").lower()
+                ):
+                    continue
+
             col1, col2 = st.columns([1, 1])
             with col1:
                 if "user" in pair:
@@ -94,7 +163,6 @@ if st.session_state.selected_file:
                     highlighted_assistant = highlight_text(pair["assistant"], keyword, element_id)
                     st.markdown(f"<div id='{element_id}' style='background:#222;padding:10px;border-radius:6px;color:#eee'>{highlighted_assistant}</div>", unsafe_allow_html=True)
 
-        # JavaScript scroll to current match
         if st.session_state.matched_elements:
             st.markdown(f"""
             <script>
@@ -105,16 +173,28 @@ if st.session_state.selected_file:
             </script>
             """, unsafe_allow_html=True)
 
-        # Save output JSON
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        json_filename = f"chat_{timestamp}.json"
-        json_path = os.path.join("output", json_filename)
-        os.makedirs("output", exist_ok=True)
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(messages, f, indent=2, ensure_ascii=False)
+        # Export buttons — generate only when clicked
+        base_filename = os.path.splitext(st.session_state.selected_file)[0]
 
-        with open(json_path, "rb") as f:
-            st.download_button("Download JSON", f, file_name=json_filename, mime="application/json")
+        st.markdown("---")
+        st.markdown("### 📤 Export Options")
+
+        col_md, col_pdf, col_json = st.columns(3)
+        with col_md:
+            if st.button("Download Markdown"):
+                md_text = export_to_markdown(messages)
+                st.download_button("📥 Save Markdown", md_text, file_name=f"{base_filename}.md", mime="text/markdown")
+
+        with col_pdf:
+            if st.button("Download PDF"):
+                pdf_path = export_to_pdf(messages)
+                with open(pdf_path, "rb") as f_pdf:
+                    st.download_button("📥 Save PDF", f_pdf, file_name=f"{base_filename}.pdf", mime="application/pdf")
+
+        with col_json:
+            if st.button("Download JSON"):
+                json_bytes = json.dumps(messages, indent=2, ensure_ascii=False).encode("utf-8")
+                st.download_button("📥 Save JSON", json_bytes, file_name=f"{base_filename}.json", mime="application/json")
 
     except Exception as e:
         st.error(f"Error: {e}")
